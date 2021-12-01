@@ -83,6 +83,8 @@ class Runner:
         params_to_train += list(self.sdf_network.parameters())
         params_to_train += list(self.deviation_network.parameters())
         params_to_train += list(self.color_network.parameters())
+        params_to_train += list(self.focal_net.parameters())
+        params_to_train += list(self.pose_param_net.parameters())
 
         self.optimizer = torch.optim.Adam(params_to_train, lr=self.learning_rate)
 
@@ -118,17 +120,18 @@ class Runner:
         image_perm = self.get_image_perm()
 
         for iter_i in tqdm(range(res_step)):
-            if iter_i >= self.start_refine_focal_epoch:
-                fxfy = self.focal_net(0)
-            else:
-                fxfy = torch.stack([self.dataset.focal, self.dataset.focal])
-
+            # if iter_i >= self.start_refine_focal_epoch:
+            #     fxfy = self.focal_net(0)
+            # else:
+            #     fxfy = torch.stack([self.dataset.focal, self.dataset.focal])
+            fxfy = self.focal_net(0)
             img_idx = image_perm[self.iter_step % len(image_perm)]
-            if iter_i >= self.start_refine_pose_epoch:
-                c2w = self.pose_param_net(img_idx)  # (4, 4)
-            else:
-                with torch.no_grad():
-                    c2w = self.pose_param_net(img_idx)  # (4, 4)
+            c2w = self.pose_param_net(img_idx)  # (4, 4)
+            # if iter_i >= self.start_refine_pose_epoch:
+            #     c2w = self.pose_param_net(img_idx)  # (4, 4)
+            # else:
+            #     with torch.no_grad():
+            #         c2w = self.pose_param_net(img_idx)  # (4, 4)
 
             data = self.dataset.gen_random_rays_at(img_idx, self.batch_size, fxfy, c2w)
 
@@ -185,7 +188,7 @@ class Runner:
 
             if self.iter_step % self.report_freq == 0:
                 print(self.base_exp_dir)
-                print('iter:{:8>d} loss = {} lr={}'.format(self.iter_step, loss, self.optimizer.param_groups[0]['lr']))
+                print('iter:{:8>d} loss = {} lr = {} psnr = {}'.format(self.iter_step, loss, self.optimizer.param_groups[0]['lr'], psnr))
 
             if self.iter_step % self.save_freq == 0:
                 self.save_checkpoint()
@@ -240,6 +243,8 @@ class Runner:
         self.sdf_network.load_state_dict(checkpoint['sdf_network_fine'])
         self.deviation_network.load_state_dict(checkpoint['variance_network_fine'])
         self.color_network.load_state_dict(checkpoint['color_network_fine'])
+        self.focal_net.load_state_dict(checkpoint['focal_fine'])
+        self.pose_param_net.load_state_dict(checkpoint['pose_fine'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
         self.iter_step = checkpoint['iter_step']
 
@@ -251,6 +256,8 @@ class Runner:
             'sdf_network_fine': self.sdf_network.state_dict(),
             'variance_network_fine': self.deviation_network.state_dict(),
             'color_network_fine': self.color_network.state_dict(),
+            'focal_fine': self.focal_net.state_dict(),
+            'pose_fine': self.pose_param_net.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'iter_step': self.iter_step,
         }
@@ -266,7 +273,9 @@ class Runner:
 
         if resolution_level < 0:
             resolution_level = self.validate_resolution_level
-        rays_o, rays_d = self.dataset.gen_rays_at(idx, resolution_level=resolution_level)
+        fxfy = self.focal_net(0)
+        c2w = self.pose_param_net(idx)
+        rays_o, rays_d = self.dataset.gen_rays_at(idx, resolution_level=resolution_level, fxfy=fxfy, c2w=c2w)
         H, W, _ = rays_o.shape
         rays_o = rays_o.reshape(-1, 3).split(self.batch_size)
         rays_d = rays_d.reshape(-1, 3).split(self.batch_size)
@@ -329,7 +338,11 @@ class Runner:
         """
         Interpolate view between two cameras.
         """
-        rays_o, rays_d = self.dataset.gen_rays_between(idx_0, idx_1, ratio, resolution_level=resolution_level)
+        fxfy = self.focal_net(0)
+        c2w_0 = self.pose_param_net(idx_0)
+        c2w_1 = self.pose_param_net(idx_1)
+
+        rays_o, rays_d = self.dataset.gen_rays_between(idx_0, idx_1, ratio, resolution_level=resolution_level, fxfy=fxfy, c2w_0=c2w_0, c2w_1=c2w_1)
         H, W, _ = rays_o.shape
         rays_o = rays_o.reshape(-1, 3).split(self.batch_size)
         rays_d = rays_d.reshape(-1, 3).split(self.batch_size)
