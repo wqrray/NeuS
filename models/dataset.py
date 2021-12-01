@@ -128,7 +128,7 @@ class Dataset:
         rays_v = p / torch.linalg.norm(p, ord=2, dim=-1, keepdim=True)    # batch_size, 3
         # rays_v = torch.matmul(self.pose_all[img_idx, None, :3, :3], rays_v[:, :, None]).squeeze()  # batch_size, 3
         # rays_o = self.pose_all[img_idx, None, :3, 3].expand(rays_v.shape) # batch_size, 3
-        rays_v = torch.matmul(c2w[None, :3, 3], rays_v[:, :, None]).squeeze()  # batch_size, 3
+        rays_v = torch.matmul(c2w[None, :3, :3], rays_v[:, :, None]).squeeze()  # batch_size, 3
         rays_o = c2w[None, :3, 3].expand(rays_v.shape)
         return torch.cat([rays_o.cpu(), rays_v.cpu(), color, mask[:, :1]], dim=-1).cuda()    # batch_size, 10
 

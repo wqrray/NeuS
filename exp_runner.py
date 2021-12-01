@@ -68,9 +68,9 @@ class Runner:
         self.sdf_network = SDFNetwork(**self.conf['model.sdf_network']).to(self.device)
         self.deviation_network = SingleVarianceNetwork(**self.conf['model.variance_network']).to(self.device)
         self.color_network = RenderingNetwork(**self.conf['model.rendering_network']).to(self.device)
-
+        
         if self.start_refine_focal_epoch > -1:
-            self.focal_net = LearnFocal(self.dataset.H, self.dataset.images.W, True, False, order=2, init_focal=self.dataset.focal)
+            self.focal_net = LearnFocal(self.dataset.H, self.dataset.W, True, False, order=2, init_focal=self.dataset.focal.item())
         else:
             self.focal_net = LearnFocal(self.dataset.H, self.dataset.W, True, False, order=2)
 
@@ -121,7 +121,7 @@ class Runner:
             if iter_i >= self.start_refine_focal_epoch:
                 fxfy = self.focal_net(0)
             else:
-                fxfy = self.dataset.focal
+                fxfy = torch.stack([self.dataset.focal, self.dataset.focal])
 
             img_idx = image_perm[self.iter_step % len(image_perm)]
             if iter_i >= self.start_refine_pose_epoch:
