@@ -15,7 +15,9 @@ from pyhocon import ConfigFactory
 from models.dataset import Dataset
 from models.fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork, NeRF
 from models.renderer import NeuSRenderer
-
+from models.intrinsics import LearnFocal
+from models.poses import LearnPose
+from utils.comp_ray_dir import comp_ray_dir_cam_fxfy, comp_ray_dir_cam
 
 class Runner:
     def __init__(self, conf_path, mode='train', case='CASE_NAME', is_continue=False):
@@ -49,6 +51,9 @@ class Runner:
         self.warm_up_end = self.conf.get_float('train.warm_up_end', default=0.0)
         self.anneal_end = self.conf.get_float('train.anneal_end', default=0.0)
 
+        self.start_refine_focal_epoch = self.conf.get_int('train.start_refine_focal_epoch')
+        self.start_refine_pose_epoch = self.conf.get_int('train.start_refine_pose_epoch')
+
         # Weights
         self.igr_weight = self.conf.get_float('train.igr_weight')
         self.mask_weight = self.conf.get_float('train.mask_weight')
@@ -63,6 +68,17 @@ class Runner:
         self.sdf_network = SDFNetwork(**self.conf['model.sdf_network']).to(self.device)
         self.deviation_network = SingleVarianceNetwork(**self.conf['model.variance_network']).to(self.device)
         self.color_network = RenderingNetwork(**self.conf['model.rendering_network']).to(self.device)
+
+        if self.start_refine_focal_epoch > -1:
+            self.focal_net = LearnFocal(self.dataset.H, self.dataset.images.W, True, False, order=2, init_focal=self.dataset.focal)
+        else:
+            self.focal_net = LearnFocal(self.dataset.H, self.dataset.W, True, False, order=2)
+
+        if self.start_refine_pose_epoch > -1:
+            self.pose_param_net = LearnPose(self.dataset.n_images, True, True, self.dataset.pose_all) # maybe not pose_all
+        else:
+            self.pose_param_net = LearnPose(self.dataset.n_images, True, True, None)
+
         params_to_train += list(self.nerf_outside.parameters())
         params_to_train += list(self.sdf_network.parameters())
         params_to_train += list(self.deviation_network.parameters())
@@ -102,7 +118,19 @@ class Runner:
         image_perm = self.get_image_perm()
 
         for iter_i in tqdm(range(res_step)):
-            data = self.dataset.gen_random_rays_at(image_perm[self.iter_step % len(image_perm)], self.batch_size)
+            if iter_i >= self.start_refine_focal_epoch:
+                fxfy = self.focal_net(0)
+            else:
+                fxfy = self.dataset.focal
+
+            img_idx = image_perm[self.iter_step % len(image_perm)]
+            if iter_i >= self.start_refine_pose_epoch:
+                c2w = self.pose_param_net(img_idx)  # (4, 4)
+            else:
+                with torch.no_grad():
+                    c2w = self.pose_param_net(img_idx)  # (4, 4)
+
+            data = self.dataset.gen_random_rays_at(img_idx, self.batch_size, fxfy, c2w)
 
             rays_o, rays_d, true_rgb, mask = data[:, :3], data[:, 3: 6], data[:, 6: 9], data[:, 9: 10]
             near, far = self.dataset.near_far_from_sphere(rays_o, rays_d)

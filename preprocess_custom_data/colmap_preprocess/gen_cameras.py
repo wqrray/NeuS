@@ -33,6 +33,7 @@ if __name__ == '__main__':
     convert_mat[2, 2] =-1.0
     convert_mat[3, 3] = 1.0
 
+    zero_world_mat = None
     for i in range(n_images):
         pose = np.diag([1.0, 1.0, 1.0, 1.0]).astype(np.float32)
         pose[:3, :4] = poses_raw[i]
@@ -44,13 +45,19 @@ if __name__ == '__main__':
         w2c = np.linalg.inv(pose)
         world_mat = intrinsic @ w2c
         world_mat = world_mat.astype(np.float32)
+        if i == 0:
+            print("intrinsic:", intrinsic)
+            print("pose raw:", poses_raw[i])
+            print("pose:", pose)
+            print("world_mat:", world_mat)
+            zero_world_mat = world_mat.copy()
         cam_dict['camera_mat_{}'.format(i)] = intrinsic
         cam_dict['camera_mat_inv_{}'.format(i)] = np.linalg.inv(intrinsic)
         cam_dict['world_mat_{}'.format(i)] = world_mat
         cam_dict['world_mat_inv_{}'.format(i)] = np.linalg.inv(world_mat)
 
 
-    pcd = trimesh.load(os.path.join(work_dir, 'sparse_points_interest.ply'))
+    pcd = trimesh.load(os.path.join(work_dir, 'sparse_points.ply'))
     vertices = pcd.vertices
     bbox_max = np.max(vertices, axis=0)
     bbox_min = np.min(vertices, axis=0)
@@ -62,6 +69,9 @@ if __name__ == '__main__':
     for i in range(n_images):
         cam_dict['scale_mat_{}'.format(i)] = scale_mat
         cam_dict['scale_mat_inv_{}'.format(i)] = np.linalg.inv(scale_mat)
+        if i == 0:
+            print("scale_mat:", scale_mat)
+            print("product:", zero_world_mat @ scale_mat)
 
     out_dir = os.path.join(work_dir, 'preprocessed')
     os.makedirs(out_dir, exist_ok=True)
